@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <corners android:radius="24dp" />
+    <!-- Gradient with 3 colors as a base. Programmatic setting might be better for 4 colors. -->
+    <gradient
+        android:angle="0"
+        android:startColor="#f97316"
+        android:centerColor="#facc15"
+        android:endColor="#0ea5e9"
+        android:type="linear" />
+</shape>

@@ -1,0 +1,11 @@
+.DS_Store
+.idea/
+
+# Android sample (keep root build/ — Vuforia SDK binaries)
+samples/**/Android/.gradle/
+samples/**/Android/build/
+samples/**/Android/app/build/
+samples/**/Android/local.properties
+samples/**/Android/.cxx/
+samples/**/Android/.externalNativeBuild/
+samples/**/*.iml

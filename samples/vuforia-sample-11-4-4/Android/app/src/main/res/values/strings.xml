@@ -1,0 +1,39 @@
+<resources>
+    <string name="app_name">Glimp</string>
+
+    <string name="splash_screen_description">Splash screen</string>
+    <string name="splash_screen_logo">Vuforia Logo</string>
+
+    <string name="main_image_target_label">Image Target</string>
+    <string name="main_model_target_label">Model Target</string>
+
+    <string name="title_activity_vuforia">Vuforia Augmented Reality</string>
+    <string name="ar_info_text">Vuforia Engine</string>
+
+    <string name="ok">OK</string>
+    <string name="error_dialog_title">Vuforia error</string>
+
+    <string name="info_dialog_title">Welcome to Glimp</string>
+    <string name="info_dialog_message">Point your camera at a Glimp-enabled image to see augmented reality content. Make sure you have good lighting and hold your device steady.</string>
+
+    <!-- Recording -->
+    <string name="record_button_content_description">Record AR experience</string>
+    <string name="recording_started">Recording started</string>
+    <string name="recording_stopped">Recording stopped</string>
+    <string name="recording_error">Recording failed</string>
+    <string name="recording_permission_required">Screen recording permission is required to record the AR experience.</string>
+
+    <!-- Preview -->
+    <string name="title_activity_preview">Preview Recording</string>
+    <string name="save_video">Save to gallery</string>
+    <string name="share_video">Share</string>
+    <string name="close_preview">Close</string>
+    <string name="video_saved">Video saved to gallery</string>
+    <string name="video_save_failed">Failed to save video</string>
+    <string name="saved">Saved</string>
+
+    <!-- Accessibility -->
+    <string name="accessibility_mic">Toggle Microphone</string>
+    <string name="accessibility_flash">Toggle Flash</string>
+    <string name="accessibility_info">App Information</string>
+</resources>
