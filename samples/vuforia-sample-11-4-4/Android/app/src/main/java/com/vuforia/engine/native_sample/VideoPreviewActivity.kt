@@ -22,6 +22,7 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import com.vuforia.engine.native_sample.notifications.GlimpAppForeground
 import androidx.core.content.FileProvider
 import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.MediaItem
@@ -137,6 +138,16 @@ class VideoPreviewActivity : AppCompatActivity() {
                 .setInterpolator(OvershootInterpolator(1.5f))
                 .start()
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        GlimpAppForeground.onActivityStarted()
+    }
+
+    override fun onStop() {
+        GlimpAppForeground.onActivityStopped()
+        super.onStop()
     }
 
     override fun onPause() {

@@ -28,11 +28,13 @@ import android.widget.Toast
 import androidx.annotation.Keep
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
+import com.vuforia.engine.native_sample.notifications.GlimpAppForeground
 import kotlinx.coroutines.*
 import java.io.File
 import java.nio.ByteBuffer
@@ -75,6 +77,7 @@ class VuforiaActivity : AppCompatActivity(), GLSurfaceView.Renderer, SurfaceHold
     private var mCurrentTargetId: String? = null
     private var mCurrentMetadata: String? = null
     private var mIsVideoActive = false
+    private var mShowOverlay = false
     private var mLastVibratedTargetId: String? = null
     private var mTargetFoundAtLeastOnce = false
     private var mLastVibrationTime: Long = 0
@@ -83,7 +86,15 @@ class VuforiaActivity : AppCompatActivity(), GLSurfaceView.Renderer, SurfaceHold
     
     // Tracking state
     private var mLastVisibleTime: Long = 0
+    private var mLastOpticalTrackTime: Long = 0
+    private var mVideoPausedForLoss = false
+    private val SOFT_LOSS_THRESHOLD = 0L // hide/pause as soon as optical tracking is gone
     private val HARD_LOSS_THRESHOLD = 8000L // 8s total loss before forcing a cloud rescan
+    private val POSE_TRACKED = 3
+    private val POSE_EXTENDED_TRACKED = 4
+    // Only cover TRACKED↔EXTENDED flicker while still looking; dead-reckoning after
+    // the photo leaves must not keep the overlay up.
+    private val EXTENDED_GRACE_MS = 80L
 
     private val mActivityScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
@@ -95,6 +106,8 @@ class VuforiaActivity : AppCompatActivity(), GLSurfaceView.Renderer, SurfaceHold
     private var mIsRecording = false
     private var mIsAudioOn = true
     private var mIsFlashOn = false
+    private var mInAppBrowserOpen = false
+    private var mHoldOverlayForInfo = false
 
     private lateinit var mARRecorder: ARRecorder
     
@@ -119,7 +132,7 @@ class VuforiaActivity : AppCompatActivity(), GLSurfaceView.Renderer, SurfaceHold
     private external fun deinitRendering()
     private external fun configureRendering(width: Int, height: Int, orientation: Int, rotation: Int) : Boolean
     private external fun renderFrame(videoTextureId: Int, showLoadingSpinner: Boolean, textureTransform: FloatArray, keepRendering: Boolean) : Boolean
-    private external fun getCloudImageTargetResult(projectionArray: FloatArray, modelViewArray: FloatArray, scaledModelViewArray: FloatArray) : Boolean
+    private external fun getCloudImageTargetResult(projectionArray: FloatArray, modelViewArray: FloatArray, scaledModelViewArray: FloatArray, poseStatusArray: IntArray) : Boolean
     private external fun startCloudImageRecognition() : Boolean
     private external fun stopCloudImageRecognition() : Boolean
     private external fun resetCloudTargetTracking()
@@ -179,7 +192,16 @@ class VuforiaActivity : AppCompatActivity(), GLSurfaceView.Renderer, SurfaceHold
                 startCloudImageRecognition()
             }
         }
-        mActivityScope.launch { mGLView.visibility = View.VISIBLE }
+        mActivityScope.launch {
+            mGLView.visibility = View.VISIBLE
+            if (!hasShownInfoPopup()) {
+                mHoldOverlayForInfo = true
+                delay(1000)
+                if (!isFinishing && !isDestroyed) {
+                    showInfoDialog(markAsShown = true)
+                }
+            }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -238,11 +260,11 @@ class VuforiaActivity : AppCompatActivity(), GLSurfaceView.Renderer, SurfaceHold
         
         val btnShop = overlay.findViewById<Button>(R.id.btn_shop)
         btnShop.setOnClickListener {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://glimp.app")))
+            openInAppBrowser(getString(R.string.shop_url))
         }
         btnShop.startAnimation(AnimationUtils.loadAnimation(this, R.anim.breathing))
-        
-        // Shop Button Styling (4-color diagonal gradient and blue border)
+
+        // Shop button: orange–yellow–pink–blue diagonal, no outline (matches iOS)
         val gradient = GradientDrawable(
             GradientDrawable.Orientation.TL_BR,
             intArrayOf(
@@ -253,8 +275,6 @@ class VuforiaActivity : AppCompatActivity(), GLSurfaceView.Renderer, SurfaceHold
             )
         )
         gradient.cornerRadius = 24f * resources.displayMetrics.density
-        val borderColor = 0xB30ea5e9.toInt() // Blue at 70% opacity
-        gradient.setStroke((2 * resources.displayMetrics.density).toInt(), borderColor)
         btnShop.background = gradient
 
         mBtnAudio.setOnClickListener {
@@ -318,15 +338,66 @@ class VuforiaActivity : AppCompatActivity(), GLSurfaceView.Renderer, SurfaceHold
         startActivity(intent)
     }
 
+    fun openInAppBrowser(url: String) {
+        val uri = Uri.parse(url)
+        if (uri.scheme.isNullOrEmpty()) {
+            Toast.makeText(this, R.string.shop_open_error, Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (mIsRecording) stopRecording()
+        mArUiRoot.visibility = View.GONE
+        mInAppBrowserOpen = true
+        try {
+            CustomTabsIntent.Builder()
+                .setShowTitle(true)
+                .setShareState(CustomTabsIntent.SHARE_STATE_ON)
+                .setUrlBarHidingEnabled(true)
+                .build()
+                .launchUrl(this, uri)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to open in-app browser", e)
+            mInAppBrowserOpen = false
+            mArUiRoot.visibility = View.VISIBLE
+            Toast.makeText(this, R.string.shop_open_error, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        GlimpAppForeground.onActivityStarted()
+    }
+
+    override fun onStop() {
+        GlimpAppForeground.onActivityStopped()
+        super.onStop()
+    }
+
     override fun onPause() {
+        if (mIsFlashOn) {
+            setFlash(false)
+            mIsFlashOn = false
+            mBtnFlash.setImageResource(R.drawable.ic_flash_off)
+        }
+        mVideoOverlayManager?.pause()
+        mIsVideoActive = false
+        mShowOverlay = false
+        mVideoPausedForLoss = true
         stopCloudImageRecognition()
         if (mVuforiaStarted) stopAR()
         if (mIsRecording) stopRecording()
+        mGLView.onPause()
         super.onPause()
     }
 
     override fun onResume() {
         super.onResume()
+        mGLView.onResume()
+        if (mInAppBrowserOpen) {
+            mInAppBrowserOpen = false
+            if (mProgressIndicatorLayout?.visibility == View.GONE) {
+                mArUiRoot.visibility = View.VISIBLE
+            }
+        }
         makeFullScreen()
         if (runtimePermissionsGranted()) {
             if (!mVuforiaStarted) {
@@ -420,39 +491,64 @@ class VuforiaActivity : AppCompatActivity(), GLSurfaceView.Renderer, SurfaceHold
         }
 
         val textureTransform = mVideoOverlayManager?.updateTexture() ?: FloatArray(16).apply { this[0]=1f; this[5]=1f; this[10]=1f; this[15]=1f }
-        val projectionArray = FloatArray(16); val modelViewArray = FloatArray(16); val scaledModelViewArray = FloatArray(16)
-        val hasCloudTarget = getCloudImageTargetResult(projectionArray, modelViewArray, scaledModelViewArray)
-
-        if (hasCloudTarget) {
-            mLastVisibleTime = System.currentTimeMillis()
-            if (mCurrentTargetId != null && !mIsVideoActive) {
-                // Regained tracking before a full reset occurred - restart video
-                mCurrentMetadata?.let { handleCloudTargetDetected(it, mCurrentTargetId!!) }
-            }
-            mTargetFoundAtLeastOnce = true
-        } else if (mCurrentTargetId != null) {
-            // Only consider it "lost" if we aren't loading
-            if (mVideoOverlayManager?.isLoading() != true) {
-                val timeSinceVisible = System.currentTimeMillis() - mLastVisibleTime
-                if (timeSinceVisible >= HARD_LOSS_THRESHOLD) {
-                    onTrackingLost()
-                }
-            } else {
-                // Reset timer while loading to ensure we don't time out before video starts
-                mLastVisibleTime = System.currentTimeMillis()
-            }
-        }
-
         val videoTextureId = mVideoOverlayManager?.getCurrentVideoTexture() ?: 0
         if (videoTextureId != 0 && mShowSpinner) { mShowSpinner = false }
-        
-        // Native render call - renders Vuforia state into current FBO
+
+        // Native render must run first: it acquires VuState, caches the pose, then
+        // releases it. Kotlin's JNI query only sees that cache after finishRender.
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, mFboId)
         GLES30.glClearColor(0f, 0f, 0f, 1f)
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT or GLES30.GL_DEPTH_BUFFER_BIT)
-        
-        val didRender = renderFrame(videoTextureId, mShowSpinner, textureTransform, mIsVideoActive && mTargetFoundAtLeastOnce)
+
+        val didRender = renderFrame(videoTextureId, mShowSpinner, textureTransform, mShowOverlay && mTargetFoundAtLeastOnce)
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+
+        val projectionArray = FloatArray(16); val modelViewArray = FloatArray(16); val scaledModelViewArray = FloatArray(16)
+        val poseStatusArray = IntArray(1)
+        val hasCloudTarget = getCloudImageTargetResult(projectionArray, modelViewArray, scaledModelViewArray, poseStatusArray)
+        val poseStatus = poseStatusArray[0]
+        val onScreen = hasCloudTarget && isTargetOnScreen(projectionArray, scaledModelViewArray)
+        val now = System.currentTimeMillis()
+        val opticallyTracked = onScreen && poseStatus == POSE_TRACKED
+        if (opticallyTracked) {
+            mLastOpticalTrackTime = now
+        }
+        // EXTENDED_TRACKED + on-screen is either Fusion flicker (keep playing) or
+        // ARCore dead-reckoning after the photo left (must pause). Only trust EXTENDED
+        // briefly after a real TRACKED, and never after we already paused.
+        val lookingAtPage = opticallyTracked ||
+            (!mVideoPausedForLoss && onScreen && poseStatus == POSE_EXTENDED_TRACKED &&
+             (now - mLastOpticalTrackTime) < EXTENDED_GRACE_MS)
+
+        if (lookingAtPage) {
+            mLastVisibleTime = now
+            mTargetFoundAtLeastOnce = true
+            mShowOverlay = true
+            if (mCurrentTargetId != null) {
+                if (mVideoPausedForLoss && opticallyTracked) {
+                    mVideoPausedForLoss = false
+                    mIsVideoActive = true
+                    mVideoOverlayManager?.play()
+                } else if (!mIsVideoActive && !mVideoPausedForLoss) {
+                    mCurrentMetadata?.let { handleCloudTargetDetected(it, mCurrentTargetId!!) }
+                }
+            }
+        } else if (mCurrentTargetId != null) {
+            mShowOverlay = false
+            if (mVideoOverlayManager?.isLoading() != true) {
+                val timeSinceVisible = System.currentTimeMillis() - mLastVisibleTime
+                if (timeSinceVisible >= SOFT_LOSS_THRESHOLD && mIsVideoActive) {
+                    mIsVideoActive = false
+                    mVideoPausedForLoss = true
+                    mVideoOverlayManager?.pause()
+                }
+                if (timeSinceVisible >= HARD_LOSS_THRESHOLD) {
+                    onTrackingLost()
+                }
+            }
+        } else {
+            mShowOverlay = false
+        }
 
         if (didRender) {
             // 1. Blit FBO to screen
@@ -466,9 +562,11 @@ class VuforiaActivity : AppCompatActivity(), GLSurfaceView.Renderer, SurfaceHold
             }
             
             if (mProgressIndicatorLayout?.visibility != View.GONE) {
-                mActivityScope.launch { 
+                mActivityScope.launch {
                     mProgressIndicatorLayout?.visibility = View.GONE
-                    mArUiRoot.visibility = View.VISIBLE 
+                    if (!mHoldOverlayForInfo) {
+                        mArUiRoot.visibility = View.VISIBLE
+                    }
                 }
             }
         }
@@ -479,6 +577,22 @@ class VuforiaActivity : AppCompatActivity(), GLSurfaceView.Renderer, SurfaceHold
         val res = FloatArray(4); Matrix.multiplyMV(res, 0, mvp, 0, floatArrayOf(point[0], point[1], point[2], 1.0f), 0)
         if (res[3] != 0.0f) { res[0] /= res[3]; res[1] /= res[3] }
         return floatArrayOf((res[0] * 0.5f + 0.5f) * mWidth, (1.0f - (res[1] * 0.5f + 0.5f)) * mHeight)
+    }
+
+    /**
+     * True when the photo's center is still in (or just outside) the camera view.
+     * Used so we pause when you pan away, without treating ARCore EXTENDED_TRACKED
+     * flicker as a loss while you are still looking at the page.
+     */
+    private fun isTargetOnScreen(projectionMatrix: FloatArray, scaledModelViewMatrix: FloatArray): Boolean {
+        val mvp = FloatArray(16)
+        Matrix.multiplyMM(mvp, 0, projectionMatrix, 0, scaledModelViewMatrix, 0)
+        val clip = FloatArray(4)
+        Matrix.multiplyMV(clip, 0, mvp, 0, floatArrayOf(0f, 0f, 0f, 1f), 0)
+        if (clip[3] <= 0.001f) return false
+        val ndcX = clip[0] / clip[3]
+        val ndcY = clip[1] / clip[3]
+        return kotlin.math.abs(ndcX) < 1.15f && kotlin.math.abs(ndcY) < 1.15f
     }
 
     override fun onSurfaceChanged(unused: GL10, width: Int, height: Int) { mWidth = width; mHeight = height; mSurfaceChanged = true }
@@ -493,6 +607,9 @@ class VuforiaActivity : AppCompatActivity(), GLSurfaceView.Renderer, SurfaceHold
         mCurrentTargetId = null
         mCurrentMetadata = null
         mIsVideoActive = false
+        mShowOverlay = false
+        mVideoPausedForLoss = false
+        mLastOpticalTrackTime = 0
         mTargetFoundAtLeastOnce = false
         mLastVibratedTargetId = null // Allow vibration on re-detection
         
@@ -522,7 +639,10 @@ class VuforiaActivity : AppCompatActivity(), GLSurfaceView.Renderer, SurfaceHold
             mCurrentTargetId = targetId
             mCurrentMetadata = metadata
             mIsVideoActive = true
+            mShowOverlay = true
+            mVideoPausedForLoss = false
             mLastVisibleTime = System.currentTimeMillis()
+            mLastOpticalTrackTime = System.currentTimeMillis()
             mShowSpinner = true
             
             mVideoOverlayManager?.startVideo(
@@ -535,8 +655,34 @@ class VuforiaActivity : AppCompatActivity(), GLSurfaceView.Renderer, SurfaceHold
         }
     }
 
-    private fun showInfoDialog() {
-        InfoPopupDialogFragment().show(supportFragmentManager, "info_popup")
+    private fun showInfoDialog(markAsShown: Boolean = false) {
+        if (supportFragmentManager.findFragmentByTag(INFO_POPUP_TAG) != null) return
+        mArUiRoot.visibility = View.GONE
+        val dialog = InfoPopupDialogFragment()
+        dialog.onOpenSite = {
+            if (markAsShown) markInfoPopupShown()
+            openInAppBrowser(getString(R.string.site_url))
+        }
+        dialog.onClosed = {
+            if (markAsShown) markInfoPopupShown()
+            mHoldOverlayForInfo = false
+            if (!mInAppBrowserOpen && mProgressIndicatorLayout?.visibility == View.GONE) {
+                mArUiRoot.visibility = View.VISIBLE
+            }
+        }
+        dialog.show(supportFragmentManager, INFO_POPUP_TAG)
+    }
+
+    private fun hasShownInfoPopup(): Boolean {
+        return getSharedPreferences(INFO_POPUP_PREFS, MODE_PRIVATE)
+            .getBoolean(KEY_HAS_SHOWN_INFO_POPUP, false)
+    }
+
+    private fun markInfoPopupShown() {
+        getSharedPreferences(INFO_POPUP_PREFS, MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_HAS_SHOWN_INFO_POPUP, true)
+            .apply()
     }
 
     override fun onDestroy() {
@@ -581,6 +727,10 @@ class VuforiaActivity : AppCompatActivity(), GLSurfaceView.Renderer, SurfaceHold
     }
 
     companion object {
+        private const val INFO_POPUP_TAG = "info_popup"
+        private const val INFO_POPUP_PREFS = "glimp_info_popup"
+        private const val KEY_HAS_SHOWN_INFO_POPUP = "HasShownInfoPopup"
+
         init {
             System.loadLibrary("VuforiaSample")
         }

@@ -339,14 +339,23 @@ class VideoOverlayManager(private val context: android.content.Context) {
     fun play() { 
         Log.d(TAG, "play() for target: $activeTargetId")
         scope.launch(Dispatchers.Main) {
-            exoPlayer?.playWhenReady = true
+            exoPlayer?.apply {
+                if (!shouldMute) volume = 1f
+                playWhenReady = true
+                play()
+            }
         }
     }
     
     fun pause() { 
         Log.d(TAG, "pause() for target: $activeTargetId")
+        state.set(VideoState.PAUSED)
         scope.launch(Dispatchers.Main) {
-            exoPlayer?.playWhenReady = false
+            exoPlayer?.apply {
+                volume = 0f
+                playWhenReady = false
+                pause()
+            }
         }
     }
 

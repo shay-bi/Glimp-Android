@@ -90,7 +90,7 @@ public:
     bool getImageTargetResult(VuMatrix44F& projectionMatrix, VuMatrix44F& modelViewMatrix, VuMatrix44F& scaledModelViewMatrix);
 
     /// Get rendering information for the Cloud Image Target.
-    bool getCloudImageTargetResult(VuMatrix44F& projectionMatrix, VuMatrix44F& modelViewMatrix, VuMatrix44F& scaledModelViewMatrix);
+    bool getCloudImageTargetResult(VuMatrix44F& projectionMatrix, VuMatrix44F& modelViewMatrix, VuMatrix44F& scaledModelViewMatrix, VuObservationPoseStatus* poseStatus = nullptr);
 
     /// Start cloud image recognition
     bool startCloudImageRecognition();
@@ -169,6 +169,15 @@ private: // data members
 
     VuState* mVuforiaState = nullptr;
     VuGuideView* mGuideViewModelTarget = nullptr;
+
+    // Last pose from a query that ran while mVuforiaState was valid (inside
+    // renderFrame / prepareToRender). Kotlin queries after finishRender has
+    // already released the state, so it must read this cache.
+    bool mLastCloudTargetFound{ false };
+    VuObservationPoseStatus mLastCloudPoseStatus{ VU_OBSERVATION_POSE_STATUS_NO_POSE };
+    VuMatrix44F mLastCloudProjection{};
+    VuMatrix44F mLastCloudModelView{};
+    VuMatrix44F mLastCloudScaledModelView{};
 
     // Handover management
     std::mutex mPendingDetectionMutex;

@@ -22,13 +22,13 @@ android {
 
     defaultConfig {
         applicationId "com.shaybi.glimp"
-        compileSdk 35
-        targetSdk 35
+        compileSdk 36
+        targetSdk 36
         minSdk 29
         ndkVersion "28.1.13356709"
 
-        versionCode 4
-        versionName '1.0.3'
+        versionCode 5
+        versionName '1.1.0'
 
         ndk {
             // VuforiaEngine supports only arm64-v8a architecture on Android
@@ -90,6 +90,9 @@ dependencies {
 
     // ExoPlayer for video playback
     implementation 'com.google.android.exoplayer:exoplayer:2.19.1'
+
+    // In-app browser (iOS SFSafariViewController equivalent)
+    implementation 'androidx.browser:browser:1.8.0'
 }
 
 // Extract the shared libraries from aars in the natives configuration.
@@ -118,5 +121,5 @@ tasks.configureEach {
 
 // Add a wrapper task so that this project can be imported into Android Studio
 tasks.register('wrapper', Wrapper) {
-    gradleVersion = "latest"
+    gradleVersion = "8.13"
 }

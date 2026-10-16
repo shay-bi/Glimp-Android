@@ -1,18 +1,13 @@
 package com.vuforia.engine.native_sample
 
 import android.animation.ObjectAnimator
-import android.content.Intent
+import android.content.DialogInterface
 import android.graphics.drawable.GradientDrawable
-import android.net.Uri
 import android.os.Bundle
-import android.text.SpannableStringBuilder
-import android.text.Spanned
-import android.text.TextPaint
-import android.text.method.LinkMovementMethod
-import android.text.style.ClickableSpan
 import android.util.TypedValue
 import android.view.*
 import android.view.animation.DecelerateInterpolator
+import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.core.view.doOnLayout
@@ -20,8 +15,12 @@ import androidx.fragment.app.DialogFragment
 
 class InfoPopupDialogFragment : DialogFragment() {
 
+    var onOpenSite: (() -> Unit)? = null
+    var onClosed: (() -> Unit)? = null
+
     private var shimmerAnimator: ObjectAnimator? = null
     private var isDismissing = false
+    private var closedNotified = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,72 +49,43 @@ class InfoPopupDialogFragment : DialogFragment() {
         val root = view.findViewById<FrameLayout>(R.id.info_popup_root)
         val card = view.findViewById<View>(R.id.info_popup_card)
         val shimmer = view.findViewById<View>(R.id.info_popup_shimmer)
-        val message = view.findViewById<TextView>(R.id.info_popup_message)
+        val link = view.findViewById<TextView>(R.id.info_popup_link)
+        val gotIt = view.findViewById<Button>(R.id.info_popup_got_it)
 
         applyGradientBackground(card)
-        configureMessage(message)
 
         root.setOnClickListener { dismissWithAnimation(card, root) }
-        card.setOnClickListener { /* consume clicks so outside tap dismiss works */ }
-
-        startEnterAnimation(card, root)
-
-        card.doOnLayout {
-            startShimmer(shimmer, card.width)
+        card.setOnClickListener { /* keep outside-tap dismiss */ }
+        gotIt.setOnClickListener { dismissWithAnimation(card, root) }
+        link.setOnClickListener {
+            onOpenSite?.invoke()
+            dismissWithAnimation(card, root)
         }
 
-        // Medium-ish haptic on show
-        view.performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM)
+        startEnterAnimation(card, root)
+        card.doOnLayout { startShimmer(shimmer, card.width) }
+        view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+    }
+
+    override fun onDismiss(dialog: DialogInterface) {
+        super.onDismiss(dialog)
+        notifyClosed()
     }
 
     private fun applyGradientBackground(view: View) {
         val colors = intArrayOf(
-            0xFFF97316.toInt(), // Orange
-            0xFFFACC15.toInt(), // Yellow
-            0xFFEC4899.toInt(), // Pink
-            0xFF0EA5E9.toInt()  // Blue
+            0xFFF97316.toInt(),
+            0xFFFACC15.toInt(),
+            0xFFEC4899.toInt(),
+            0xFF0EA5E9.toInt()
         )
-        val stops = floatArrayOf(0.0f, 0.35f, 0.65f, 1.0f)
-
         val gradient = GradientDrawable(GradientDrawable.Orientation.TL_BR, colors)
-        // setColors(colors, stops) is available on API 29+
-        gradient.setColors(colors, stops)
+        gradient.setColors(colors, floatArrayOf(0.0f, 0.35f, 0.65f, 1.0f))
         gradient.cornerRadius = TypedValue.applyDimension(
-            TypedValue.COMPLEX_UNIT_DIP, 25f, resources.displayMetrics
-        )
-        gradient.setStroke(
-            TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 1.5f, resources.displayMetrics).toInt(),
-            0xB30EA5E9.toInt() // 70% opacity of glimp_blue
+            TypedValue.COMPLEX_UNIT_DIP, 28f, resources.displayMetrics
         )
         view.background = gradient
-    }
-
-    private fun configureMessage(message: TextView) {
-        val text = SpannableStringBuilder()
-        text.append("Scan Your Glimp And\n")
-        text.append("The Magic Begins!\n\n")
-        val prefix = "Create a new Glimp on "
-        text.append(prefix)
-        val linkText = "glimp.app"
-        val linkStart = text.length
-        text.append(linkText)
-
-        val linkSpan = object : ClickableSpan() {
-            override fun onClick(widget: View) {
-                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://glimp.app")))
-            }
-
-            override fun updateDrawState(ds: TextPaint) {
-                ds.isUnderlineText = true
-                ds.color = 0xFF66CCFF.toInt()
-            }
-        }
-
-        text.setSpan(linkSpan, linkStart, linkStart + linkText.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-
-        message.text = text
-        message.movementMethod = LinkMovementMethod.getInstance()
-        message.highlightColor = android.graphics.Color.TRANSPARENT
+        view.clipToOutline = true
     }
 
     private fun startEnterAnimation(card: View, root: View) {
@@ -155,7 +125,7 @@ class InfoPopupDialogFragment : DialogFragment() {
             }
             .start()
 
-        view?.performHapticFeedback(android.view.HapticFeedbackConstants.REJECT)
+        view?.performHapticFeedback(HapticFeedbackConstants.REJECT)
     }
 
     private fun startShimmer(shimmer: View, cardWidth: Int) {
@@ -172,6 +142,12 @@ class InfoPopupDialogFragment : DialogFragment() {
             interpolator = DecelerateInterpolator()
             start()
         }
+    }
+
+    private fun notifyClosed() {
+        if (closedNotified) return
+        closedNotified = true
+        onClosed?.invoke()
     }
 
     override fun onDestroyView() {

@@ -397,14 +397,26 @@ AppController::getImageTargetResult(VuMatrix44F&, VuMatrix44F&, VuMatrix44F&)
 
 
 bool
-AppController::getCloudImageTargetResult(VuMatrix44F& projectionMatrix, VuMatrix44F& modelViewMatrix, VuMatrix44F& scaledModelViewMatrix)
+AppController::getCloudImageTargetResult(VuMatrix44F& projectionMatrix, VuMatrix44F& modelViewMatrix, VuMatrix44F& scaledModelViewMatrix, VuObservationPoseStatus* poseStatus)
 {
-    if (mVuforiaState == nullptr) return false;
+    if (mVuforiaState == nullptr)
+    {
+        if (!mLastCloudTargetFound) return false;
+        projectionMatrix = mLastCloudProjection;
+        modelViewMatrix = mLastCloudModelView;
+        scaledModelViewMatrix = mLastCloudScaledModelView;
+        if (poseStatus)
+        {
+            *poseStatus = mLastCloudPoseStatus;
+        }
+        return true;
+    }
 
     VuObservationList* observationList = nullptr;
     REQUIRE_SUCCESS(vuObservationListCreate(&observationList));
 
     bool found = false;
+    VuObservationPoseStatus foundPoseStatus = VU_OBSERVATION_POSE_STATUS_NO_POSE;
     if (vuStateGetImageTargetObservations(mVuforiaState, observationList) == VU_SUCCESS)
     {
         int numObservations = 0;
@@ -416,12 +428,12 @@ AppController::getCloudImageTargetResult(VuMatrix44F& projectionMatrix, VuMatrix
             if (vuObservationListGetElement(observationList, i, &observation) == VU_SUCCESS)
             {
                 VuPoseInfo poseInfo;
+                // Android Fusion often reports EXTENDED_TRACKED even while the page is
+                // still in view. Require a pose; Kotlin decides if the page is on-screen.
                 if (vuObservationGetPoseInfo(observation, &poseInfo) == VU_SUCCESS &&
                     (poseInfo.poseStatus == VU_OBSERVATION_POSE_STATUS_TRACKED ||
                      poseInfo.poseStatus == VU_OBSERVATION_POSE_STATUS_EXTENDED_TRACKED))
                 {
-                    // More lenient presence check for loss-debounce logic.
-                    // If we have a valid pose (tracked or extended), we consider the target "found".
                     {
                         VuImageTargetObservationTargetInfo targetInfo;
                         REQUIRE_SUCCESS(vuImageTargetObservationGetTargetInfo(observation, &targetInfo));
@@ -436,6 +448,7 @@ AppController::getCloudImageTargetResult(VuMatrix44F& projectionMatrix, VuMatrix
                         scaledModelViewMatrix = vuMatrix44FScale(scale, modelViewMatrix);
 
                         found = true;
+                        foundPoseStatus = poseInfo.poseStatus;
                         break;
                     }
                 }
@@ -444,6 +457,19 @@ AppController::getCloudImageTargetResult(VuMatrix44F& projectionMatrix, VuMatrix
     }
 
     REQUIRE_SUCCESS(vuObservationListDestroy(observationList));
+
+    mLastCloudTargetFound = found;
+    mLastCloudPoseStatus = foundPoseStatus;
+    if (found)
+    {
+        mLastCloudProjection = projectionMatrix;
+        mLastCloudModelView = modelViewMatrix;
+        mLastCloudScaledModelView = scaledModelViewMatrix;
+    }
+    if (poseStatus)
+    {
+        *poseStatus = foundPoseStatus;
+    }
     return found;
 }
 
@@ -488,6 +514,9 @@ AppController::resetCloudTargetTracking()
         mPendingMetadata.clear();
         mActiveTargetId.clear();
     }
+
+    mLastCloudTargetFound = false;
+    mLastCloudPoseStatus = VU_OBSERVATION_POSE_STATUS_NO_POSE;
 
     // Force a fresh scan by deactivating and reactivating
     vuObserverDeactivate(mCloudImageTargetObserver);

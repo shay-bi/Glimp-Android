@@ -2,9 +2,11 @@ package com.vuforia.engine.native_sample.notifications
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -17,30 +19,41 @@ class GlimpNotificationReceiver : BroadcastReceiver() {
         val title = intent.getStringExtra("title") ?: return
         val body = intent.getStringExtra("body") ?: return
 
-        val nm = NotificationManagerCompat.from(context)
-        val channelId = "glimp_marketing"
-        createChannel(context, channelId)
-
-        val notification = NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(R.drawable.applogo)
-            .setContentTitle(title)
-            .setContentText(body)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setAutoCancel(true)
-            .build()
-
-        try {
-            nm.notify(id.hashCode(), notification)
-        } catch (e: SecurityException) {
-            // Permission might have been revoked
-        }
-
-        // Chaining: If this was a recurring reminder, schedule the next one
         if (id == "recurring_reminder") {
             val prefs = NotificationPrefsStore.load(context)
             if (prefs.allowReminderNotifications) {
                 GlimpNotificationManager.scheduleRecurringReminders(context, prefs.reminderFrequency)
             }
+        }
+
+        if (GlimpAppForeground.isForeground) {
+            return
+        }
+
+        val channelId = "glimp_marketing"
+        createChannel(context, channelId)
+
+        val shopIntent = Intent(Intent.ACTION_VIEW, Uri.parse(context.getString(R.string.shop_url))).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+            if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0
+        val contentIntent = PendingIntent.getActivity(context, id.hashCode(), shopIntent, flags)
+
+        val notification = NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(R.drawable.applogo)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setContentIntent(contentIntent)
+            .setAutoCancel(true)
+            .build()
+
+        try {
+            NotificationManagerCompat.from(context).notify(id.hashCode(), notification)
+        } catch (_: SecurityException) {
+            // Permission might have been revoked
         }
     }
 

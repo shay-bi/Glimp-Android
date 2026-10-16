@@ -22,6 +22,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
 import com.vuforia.engine.native_sample.databinding.ActivitySplashScreenBinding
+import com.vuforia.engine.native_sample.notifications.GlimpAppForeground
 import com.vuforia.engine.native_sample.notifications.GlimpNotificationManager
 
 
@@ -48,15 +49,23 @@ class SplashScreenActivity : AppCompatActivity() {
                     View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
                     View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
 
-        // Ensure "Glimp" text respects the bottom safe area (navigation bar/gesture area)
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { v, windowInsets ->
             val insets = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars())
-            // Add the bottom inset to the root padding so the 8dp margin in XML starts above it
             v.updatePadding(bottom = insets.bottom)
             windowInsets
         }
 
         checkNotificationPermission()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        GlimpAppForeground.onActivityStarted()
+    }
+
+    override fun onStop() {
+        GlimpAppForeground.onActivityStopped()
+        super.onStop()
     }
 
     private fun checkNotificationPermission() {

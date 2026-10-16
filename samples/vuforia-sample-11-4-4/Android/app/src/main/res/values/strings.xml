@@ -7,14 +7,29 @@
     <string name="main_image_target_label">Image Target</string>
     <string name="main_model_target_label">Model Target</string>
 
-    <string name="title_activity_vuforia">Vuforia Augmented Reality</string>
+    <string name="title_activity_vuforia">Glimp</string>
     <string name="ar_info_text">Vuforia Engine</string>
 
     <string name="ok">OK</string>
     <string name="error_dialog_title">Vuforia error</string>
+    <string name="shop_button">SHOP</string>
+    <string name="shop_url">https://glimp.app/shop</string>
+    <string name="shop_open_error">Something went wrong opening the shop. Please try again later.</string>
 
-    <string name="info_dialog_title">Welcome to Glimp</string>
-    <string name="info_dialog_message">Point your camera at a Glimp-enabled image to see augmented reality content. Make sure you have good lighting and hold your device steady.</string>
+    <string name="site_url">https://glimp.app</string>
+    <string name="info_popup_headline">Scan a photo.\nWatch it play.</string>
+    <string name="info_popup_body">Hold a page of your photobook in the camera. When Glimp finds the photo, the video plays on the page.</string>
+    <string name="info_popup_step1_num">01</string>
+    <string name="info_popup_step1_title">Open</string>
+    <string name="info_popup_step1_sub">a page</string>
+    <string name="info_popup_step2_num">02</string>
+    <string name="info_popup_step2_title">Hold</string>
+    <string name="info_popup_step2_sub">it still</string>
+    <string name="info_popup_step3_num">03</string>
+    <string name="info_popup_step3_title">Watch</string>
+    <string name="info_popup_step3_sub">it play</string>
+    <string name="info_popup_link">Make another at glimp.app</string>
+    <string name="info_popup_got_it">GOT IT</string>
 
     <!-- Recording -->
     <string name="record_button_content_description">Record AR experience</string>

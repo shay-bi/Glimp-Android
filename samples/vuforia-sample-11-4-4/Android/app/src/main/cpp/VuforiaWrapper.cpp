@@ -393,7 +393,10 @@ Java_com_vuforia_engine_native_1sample_VuforiaActivity_renderFrame(JNIEnv* env, 
 
         bool hasCloudTarget = controller.getCloudImageTargetResult(trackableProjection, trackableModelView, trackableModelViewScaled);
 
-        if (hasCloudTarget || keepRendering)
+        // Fusion keeps a TRACKED/EXTENDED pose for ~1–2s after the photo leaves.
+        // Kotlin's keepRendering is the only hide signal — do not draw just because
+        // a stale pose is still available.
+        if (keepRendering)
         {
             if (hasCloudTarget)
             {
@@ -428,14 +431,21 @@ Java_com_vuforia_engine_native_1sample_VuforiaActivity_renderFrame(JNIEnv* env, 
 
 JNIEXPORT jboolean JNICALL
 Java_com_vuforia_engine_native_1sample_VuforiaActivity_getCloudImageTargetResult(JNIEnv* env, jobject /* this */, jfloatArray projectionArray,
-                                                                                 jfloatArray modelViewArray, jfloatArray scaledModelViewArray)
+                                                                                 jfloatArray modelViewArray, jfloatArray scaledModelViewArray,
+                                                                                 jintArray poseStatusArray)
 {
     VuMatrix44F projection, modelView, scaledModelView;
-    if (controller.getCloudImageTargetResult(projection, modelView, scaledModelView))
+    VuObservationPoseStatus poseStatus = VU_OBSERVATION_POSE_STATUS_NO_POSE;
+    if (controller.getCloudImageTargetResult(projection, modelView, scaledModelView, &poseStatus))
     {
         env->SetFloatArrayRegion(projectionArray, 0, 16, projection.data);
         env->SetFloatArrayRegion(modelViewArray, 0, 16, modelView.data);
         env->SetFloatArrayRegion(scaledModelViewArray, 0, 16, scaledModelView.data);
+        if (poseStatusArray != nullptr && env->GetArrayLength(poseStatusArray) > 0)
+        {
+            jint status = static_cast<jint>(poseStatus);
+            env->SetIntArrayRegion(poseStatusArray, 0, 1, &status);
+        }
         return JNI_TRUE;
     }
     return JNI_FALSE;
